@@ -161,7 +161,7 @@ class _PCRemoteServerHomePageState extends State<PCRemoteServerHomePage> with Wi
       await _server?.close();
       _channel?.sink.close();
       
-      setState(() {
+    setState(() {
         _isRunning = false;
         _serverUrl = '';
         _connectionToken = '';
@@ -598,10 +598,10 @@ class _PCRemoteServerHomePageState extends State<PCRemoteServerHomePage> with Wi
               color: Colors.blue.shade50,
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Column(
+        child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+            Text(
                       'How to Use:',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
