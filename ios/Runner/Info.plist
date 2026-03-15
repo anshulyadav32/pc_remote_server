@@ -45,5 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>This app uses Bluetooth to discover and connect remote control devices.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>This app uses Bluetooth to discover and connect remote control devices.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Location access is used for Bluetooth scanning on supported devices.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>This app uses local network access to control your PC over WiFi.</string>
 </dict>
 </plist>
