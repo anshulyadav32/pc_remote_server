@@ -184,6 +184,7 @@ class LocalServerService {
       _discoverySocket = await RawDatagramSocket.bind(
         InternetAddress.anyIPv4,
         8766,
+        reuseAddress: true,
       );
       _discoverySocket!.broadcastEnabled = true;
 
@@ -339,10 +340,13 @@ class LocalServerService {
         return;
       }
 
-      final trusted = _trustedDevices[deviceId] ?? _findTrustedByPairCode(pairCode);
+      final trusted =
+          _trustedDevices[deviceId] ?? _findTrustedByPairCode(pairCode);
       if (trusted != null && trusted.deviceId.isNotEmpty) {
-        final resolvedDeviceId = deviceId.isNotEmpty ? deviceId : trusted.deviceId;
-        final resolvedPairCode = pairCode.isNotEmpty ? pairCode : trusted.pairCode;
+        final resolvedDeviceId =
+            deviceId.isNotEmpty ? deviceId : trusted.deviceId;
+        final resolvedPairCode =
+            pairCode.isNotEmpty ? pairCode : trusted.pairCode;
         _pairedDevices[clientId] = PairedDevice(
           clientId: clientId,
           deviceId: resolvedDeviceId,
@@ -371,7 +375,8 @@ class LocalServerService {
             protocolVersion: trusted.protocolVersion,
             capabilities: trusted.capabilities,
             permissions: trusted.permissions,
-            updatedAtEpochSeconds: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            updatedAtEpochSeconds:
+                DateTime.now().millisecondsSinceEpoch ~/ 1000,
           );
           unawaited(TrustStoreService.save(_trustedDevices));
         }
@@ -783,6 +788,22 @@ class LocalServerService {
   }
 
   String _defaultServerName() {
+    if (Platform.isAndroid) {
+      return 'Android Phone';
+    }
+    if (Platform.isIOS) {
+      return 'iPhone';
+    }
+    if (Platform.isWindows) {
+      return 'Windows PC';
+    }
+    if (Platform.isMacOS) {
+      return 'Mac';
+    }
+    if (Platform.isLinux) {
+      return 'Linux PC';
+    }
+
     final host = Platform.localHostname.trim();
     return host.isEmpty ? 'PCRemote Server' : host;
   }

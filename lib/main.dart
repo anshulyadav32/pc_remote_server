@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'screens/home_screen.dart';
 
@@ -19,7 +22,50 @@ class PCRemoteApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
       ),
-      home: const HomeScreen(),
+      home: const _PermissionBootstrap(),
     );
+  }
+}
+
+class _PermissionBootstrap extends StatefulWidget {
+  const _PermissionBootstrap();
+
+  @override
+  State<_PermissionBootstrap> createState() => _PermissionBootstrapState();
+}
+
+class _PermissionBootstrapState extends State<_PermissionBootstrap> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestAndroidPermissions();
+    });
+  }
+
+  Future<void> _requestAndroidPermissions() async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+
+    final permissions = <Permission>[
+      Permission.notification,
+      Permission.locationWhenInUse,
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.bluetoothAdvertise,
+      Permission.nearbyWifiDevices,
+    ];
+
+    for (final permission in permissions) {
+      await permission.request();
+    }
+
+    await Permission.ignoreBatteryOptimizations.request();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const HomeScreen();
   }
 }

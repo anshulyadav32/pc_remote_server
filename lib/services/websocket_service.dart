@@ -66,9 +66,10 @@ class WebSocketService {
       }
 
       final uri = _parseServerUri(serverUrl);
+      final resolvedDeviceName =
+          deviceName.trim().isEmpty ? _defaultClientName() : deviceName.trim();
       final identity = await DeviceIdentityService.loadOrCreate(
-        defaultName:
-            deviceName.trim().isEmpty ? 'Flutter Device' : deviceName.trim(),
+        defaultName: resolvedDeviceName,
         deviceType: _defaultDeviceType(),
         capabilities: _capabilities,
       );
@@ -257,7 +258,7 @@ class WebSocketService {
     _sendRaw({
       'type': 'pair.request',
       'deviceName': (deviceName ?? _lastDeviceName).trim().isEmpty
-          ? 'Flutter Device'
+          ? _defaultClientName()
           : (deviceName ?? _lastDeviceName).trim(),
       'deviceId': resolvedDeviceId,
       'pairCode': _buildPairCode(resolvedDeviceId),
@@ -278,6 +279,25 @@ class WebSocketService {
       return 'desktop';
     }
     return 'unknown';
+  }
+
+  String _defaultClientName() {
+    if (Platform.isAndroid) {
+      return 'Android Phone';
+    }
+    if (Platform.isIOS) {
+      return 'iPhone';
+    }
+    if (Platform.isWindows) {
+      return 'Windows Device';
+    }
+    if (Platform.isMacOS) {
+      return 'Mac Device';
+    }
+    if (Platform.isLinux) {
+      return 'Linux Device';
+    }
+    return 'Flutter Device';
   }
 
   String _generateNonce() {

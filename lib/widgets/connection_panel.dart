@@ -108,7 +108,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     StreamSubscription<RawSocketEvent>? sub;
 
     try {
-      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        0,
+        reuseAddress: true,
+      );
       socket.broadcastEnabled = true;
 
       sub = socket.listen((event) {
@@ -125,7 +129,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       });
 
       final payload = utf8.encode(jsonEncode({'type': 'discover'}));
-      socket.send(payload, InternetAddress('255.255.255.255'), 8766);
+      final targets = await _discoveryTargets();
+      for (final target in targets) {
+        socket.send(payload, target, 8766);
+      }
 
       await Future<void>.delayed(const Duration(seconds: 3));
     } catch (_) {
@@ -137,6 +144,40 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         setState(() => _isDiscovering = false);
       }
     }
+  }
+
+  Future<List<InternetAddress>> _discoveryTargets() async {
+    final targets = <InternetAddress>{
+      InternetAddress('255.255.255.255'),
+    };
+
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+
+      for (final interface in interfaces) {
+        for (final address in interface.addresses) {
+          final host = address.address;
+          final parts = host.split('.');
+          if (parts.length != 4) {
+            continue;
+          }
+
+          final last = int.tryParse(parts[3]);
+          if (last == null) {
+            continue;
+          }
+
+          // Best-effort /24 broadcast target for common home LANs.
+          targets
+              .add(InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'));
+        }
+      }
+    } catch (_) {}
+
+    return targets.toList();
   }
 
   void _handleDiscoveryResponse(Datagram datagram) {
@@ -210,6 +251,19 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     final localIp = widget.serverService.localIp;
     return serverPort == widget.serverService.port &&
         (host == localIp || host == '127.0.0.1' || host == 'localhost');
+  }
+
+  String _deviceAddressLabel(_DiscoveredDevice device) {
+    final isMobileName =
+        device.name.toLowerCase().contains('android') ||
+            device.name.toLowerCase().contains('phone') ||
+            device.name.toLowerCase().contains('mobile');
+
+    if (Platform.isWindows && isMobileName) {
+      return 'localhost:${device.serverPort}';
+    }
+
+    return '${device.host}:${device.serverPort}';
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -310,7 +364,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                       child: ListTile(
                         leading: const Icon(Icons.devices),
                         title: Text(device.name),
-                        subtitle: Text('${device.host}:${device.serverPort}'),
+                        subtitle: Text(_deviceAddressLabel(device)),
                         trailing: FilledButton(
                           onPressed: _isConnecting
                               ? null
