@@ -301,6 +301,7 @@ class LocalServerService {
       final clientPort =
           int.tryParse(message['clientPort']?.toString() ?? '') ?? 0;
       final deviceId = message['deviceId']?.toString() ?? '';
+      final pairCode = message['pairCode']?.toString() ?? '';
       final deviceType = message['deviceType']?.toString() ?? 'unknown';
       final protocolVersion =
           int.tryParse(message['protocolVersion']?.toString() ?? '') ?? 1;
@@ -338,11 +339,14 @@ class LocalServerService {
         return;
       }
 
-      final trusted = _trustedDevices[deviceId];
+      final trusted = _trustedDevices[deviceId] ?? _findTrustedByPairCode(pairCode);
       if (trusted != null && trusted.deviceId.isNotEmpty) {
+        final resolvedDeviceId = deviceId.isNotEmpty ? deviceId : trusted.deviceId;
+        final resolvedPairCode = pairCode.isNotEmpty ? pairCode : trusted.pairCode;
         _pairedDevices[clientId] = PairedDevice(
           clientId: clientId,
-          deviceId: trusted.deviceId,
+          deviceId: resolvedDeviceId,
+          pairCode: resolvedPairCode,
           deviceName: trusted.deviceName,
           deviceType: trusted.deviceType,
           protocolVersion: trusted.protocolVersion,
@@ -358,6 +362,19 @@ class LocalServerService {
             textInput: trusted.permissions.textInput,
           ),
         );
+        if (resolvedDeviceId.isNotEmpty) {
+          _trustedDevices[resolvedDeviceId] = TrustedDeviceRecord(
+            deviceId: resolvedDeviceId,
+            pairCode: resolvedPairCode,
+            deviceName: trusted.deviceName,
+            deviceType: trusted.deviceType,
+            protocolVersion: trusted.protocolVersion,
+            capabilities: trusted.capabilities,
+            permissions: trusted.permissions,
+            updatedAtEpochSeconds: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          );
+          unawaited(TrustStoreService.save(_trustedDevices));
+        }
         _emitPairedDevices();
 
         final socket = _clients[clientId];
@@ -377,6 +394,7 @@ class LocalServerService {
       _pendingRequests[clientId] = ConnectionRequest(
         clientId: clientId,
         deviceId: deviceId,
+        pairCode: pairCode,
         deviceName: name,
         deviceType: deviceType,
         protocolVersion: protocolVersion,
@@ -505,6 +523,7 @@ class LocalServerService {
     final paired = PairedDevice(
       clientId: clientId,
       deviceId: request.deviceId,
+      pairCode: request.pairCode,
       deviceName: request.deviceName,
       deviceType: request.deviceType,
       protocolVersion: request.protocolVersion,
@@ -516,6 +535,7 @@ class LocalServerService {
     _pairedDevices[clientId] = paired;
     _trustedDevices[paired.deviceId] = TrustedDeviceRecord(
       deviceId: paired.deviceId,
+      pairCode: paired.pairCode,
       deviceName: paired.deviceName,
       deviceType: paired.deviceType,
       protocolVersion: paired.protocolVersion,
@@ -572,6 +592,7 @@ class LocalServerService {
 
     _trustedDevices[updated.deviceId] = TrustedDeviceRecord(
       deviceId: updated.deviceId,
+      pairCode: updated.pairCode,
       deviceName: updated.deviceName,
       deviceType: updated.deviceType,
       protocolVersion: updated.protocolVersion,
@@ -827,6 +848,20 @@ class LocalServerService {
     return paired.permissions.allows(plugin);
   }
 
+  TrustedDeviceRecord? _findTrustedByPairCode(String pairCode) {
+    if (pairCode.isEmpty) {
+      return null;
+    }
+
+    for (final record in _trustedDevices.values) {
+      if (record.pairCode == pairCode) {
+        return record;
+      }
+    }
+
+    return null;
+  }
+
   void dispose() {
     final server = _server;
     _server = null;
@@ -858,6 +893,7 @@ class LocalServerService {
 class ConnectionRequest {
   final String clientId;
   final String deviceId;
+  final String pairCode;
   final String deviceName;
   final String deviceType;
   final int protocolVersion;
@@ -870,6 +906,7 @@ class ConnectionRequest {
   const ConnectionRequest({
     required this.clientId,
     required this.deviceId,
+    this.pairCode = '',
     required this.deviceName,
     required this.deviceType,
     required this.protocolVersion,
@@ -884,6 +921,7 @@ class ConnectionRequest {
 class PairedDevice {
   final String clientId;
   final String deviceId;
+  final String pairCode;
   final String deviceName;
   final String deviceType;
   final int protocolVersion;
@@ -895,6 +933,7 @@ class PairedDevice {
   const PairedDevice({
     required this.clientId,
     required this.deviceId,
+    this.pairCode = '',
     required this.deviceName,
     required this.deviceType,
     required this.protocolVersion,
@@ -910,6 +949,7 @@ class PairedDevice {
     return PairedDevice(
       clientId: clientId,
       deviceId: deviceId,
+      pairCode: pairCode,
       deviceName: deviceName,
       deviceType: deviceType,
       protocolVersion: protocolVersion,

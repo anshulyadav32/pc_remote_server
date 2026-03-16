@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:web_socket_channel/status.dart' as status;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -34,6 +35,8 @@ class WebSocketService {
   int _lastClientPort = 8766;
   String _lastDeviceName = 'Flutter Device';
   String _lastDeviceId = '';
+  Timer? _autoClipboardPollTimer;
+  String _lastLocalClipboardText = '';
   bool _isConnected = false;
   bool _isDisposed = false;
 
@@ -122,6 +125,8 @@ class WebSocketService {
   }
 
   Future<void> disconnect() async {
+    _stopAutoClipboardSync(notifyServer: true);
+
     await _subscription?.cancel();
     _subscription = null;
 
@@ -133,6 +138,8 @@ class WebSocketService {
   }
 
   void _handleDisconnection() {
+    _stopAutoClipboardSync();
+
     _isConnected = false;
     _addConnectionState(false);
     _addRequestStatus('disconnected');
@@ -161,18 +168,77 @@ class WebSocketService {
 
   void _handleSystemMessage(Map<String, dynamic> message) {
     final type = message['type']?.toString() ?? '';
+
+    if (type == 'clipboard.update' || type == 'clipboard_content') {
+      final text = (message['text'] ?? message['content'] ?? '').toString();
+      unawaited(_applyRemoteClipboard(text));
+      return;
+    }
+
     if (type == 'connect.pending') {
       _addRequestStatus('pending');
       return;
     }
     if (type == 'connect.accepted') {
       _addRequestStatus('accepted');
+      unawaited(_startAutoClipboardSync());
       return;
     }
     if (type == 'connect.rejected') {
       _addRequestStatus('rejected');
+      _stopAutoClipboardSync(notifyServer: true);
       return;
     }
+  }
+
+  Future<void> _startAutoClipboardSync() async {
+    if (_autoClipboardPollTimer != null || !_isConnected) {
+      return;
+    }
+
+    final existing = await Clipboard.getData('text/plain');
+    _lastLocalClipboardText = existing?.text ?? '';
+
+    _sendRaw({'type': 'enable_auto_clipboard'});
+    _sendRaw({'type': 'get_clipboard'});
+
+    _autoClipboardPollTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => unawaited(_syncLocalClipboardToRemote()),
+    );
+  }
+
+  Future<void> _syncLocalClipboardToRemote() async {
+    if (!_isConnected) {
+      _stopAutoClipboardSync();
+      return;
+    }
+
+    final data = await Clipboard.getData('text/plain');
+    final text = data?.text ?? '';
+    if (text == _lastLocalClipboardText) {
+      return;
+    }
+
+    _lastLocalClipboardText = text;
+    _sendRaw({'type': 'clipboard.set', 'text': text});
+  }
+
+  Future<void> _applyRemoteClipboard(String text) async {
+    if (text == _lastLocalClipboardText) {
+      return;
+    }
+
+    _lastLocalClipboardText = text;
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  void _stopAutoClipboardSync({bool notifyServer = false}) {
+    if (notifyServer && _isConnected) {
+      _sendRaw({'type': 'disable_auto_clipboard'});
+    }
+    _autoClipboardPollTimer?.cancel();
+    _autoClipboardPollTimer = null;
   }
 
   void sendConnectionRequest({
@@ -187,12 +253,14 @@ class WebSocketService {
     final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
     _addRequestStatus('sending');
+    final resolvedDeviceId = (deviceId ?? _lastDeviceId).trim();
     _sendRaw({
       'type': 'pair.request',
       'deviceName': (deviceName ?? _lastDeviceName).trim().isEmpty
           ? 'Flutter Device'
           : (deviceName ?? _lastDeviceName).trim(),
-      'deviceId': (deviceId ?? _lastDeviceId).trim(),
+      'deviceId': resolvedDeviceId,
+      'pairCode': _buildPairCode(resolvedDeviceId),
       'deviceType': _defaultDeviceType(),
       'protocolVersion': DeviceIdentityService.protocolVersion,
       'capabilities': _capabilities,
@@ -216,6 +284,15 @@ class WebSocketService {
     final random = Random.secure();
     final bytes = List<int>.generate(12, (_) => random.nextInt(256));
     return bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  String _buildPairCode(String deviceId) {
+    final cleaned =
+        deviceId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toUpperCase();
+    if (cleaned.length >= 6) {
+      return cleaned.substring(cleaned.length - 6);
+    }
+    return cleaned.padLeft(6, '0');
   }
 
   void sendCommand(Map<String, dynamic> command) {
@@ -280,6 +357,7 @@ class WebSocketService {
 
   void dispose() {
     _isDisposed = true;
+    _stopAutoClipboardSync();
 
     final subscription = _subscription;
     _subscription = null;

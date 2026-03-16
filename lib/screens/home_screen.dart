@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -27,34 +28,35 @@ class _HomeScreenState extends State<HomeScreen> {
   final LocalServerService _serverService = LocalServerService();
   final WebSocketService _wsService = WebSocketService();
   _MenuSection _selectedSection = _MenuSection.client;
+  StreamSubscription<List<PairedDevice>>? _pairedDevicesSubscription;
+  String _clientSectionLabel = 'No connected device';
 
   Widget _buildBrandLogo() {
-    return Container(
-      width: 64,
-      height: 64,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF3E7BFA), Color(0xFF25C2A0)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x5525C2A0),
-            blurRadius: 12,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: const Icon(Icons.settings_remote_rounded,
-          color: Colors.white, size: 36),
+    return const Icon(
+      Icons.phone_android_rounded,
+      color: Color(0xFFBCC2CD),
+      size: 56,
     );
   }
 
   @override
   void initState() {
     super.initState();
+
+    _clientSectionLabel = _buildClientSectionLabel(
+      _serverService.currentPairedDevices,
+    );
+
+    _pairedDevicesSubscription = _serverService.pairedDevicesStream.listen(
+      (devices) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _clientSectionLabel = _buildClientSectionLabel(devices);
+        });
+      },
+    );
 
     // Auto-start server on launch
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -64,9 +66,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _pairedDevicesSubscription?.cancel();
     _serverService.dispose();
     _wsService.dispose();
     super.dispose();
+  }
+
+  String _buildClientSectionLabel(List<PairedDevice> pairedDevices) {
+    if (pairedDevices.isEmpty) {
+      return 'No connected device';
+    }
+
+    final firstName = pairedDevices.first.deviceName.trim();
+    if (pairedDevices.length == 1) {
+      return firstName.isEmpty ? 'Connected device' : firstName;
+    }
+
+    final head = firstName.isEmpty ? 'Connected device' : firstName;
+    return '$head +${pairedDevices.length - 1}';
+  }
+
+  String _activeDeviceTitle() {
+    if (_clientSectionLabel == 'No connected device') {
+      return _deviceTitle();
+    }
+    return _clientSectionLabel;
   }
 
   String _deviceTitle() {
@@ -86,12 +110,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final selected = _selectedSection == section;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
       child: Material(
-        color: selected ? const Color(0xFF2A2F3C) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        color: selected ? const Color(0xFF475268) : Colors.transparent,
+        borderRadius: BorderRadius.circular(28),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(28),
           onTap: () {
             setState(() => _selectedSection = section);
             if (compact) {
@@ -99,17 +123,25 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
             child: Row(
               children: [
-                Icon(icon, color: Colors.white70, size: 32),
-                const SizedBox(width: 18),
+                Icon(
+                  icon,
+                  color: selected
+                      ? const Color(0xFFE6EAF2)
+                      : const Color(0xFFB9BFCA),
+                  size: 22,
+                ),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Text(
                     label,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 20,
+                    style: TextStyle(
+                      color: selected
+                          ? const Color(0xFFF1F4FA)
+                          : const Color(0xFFC2C8D2),
+                      fontSize: 21,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -129,63 +161,76 @@ class _HomeScreenState extends State<HomeScreen> {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF161B24), Color(0xFF141923)],
+          colors: [Color(0xFF1A202B), Color(0xFF171D28)],
+        ),
+        borderRadius: BorderRadius.only(
+          topRight: Radius.circular(34),
+          bottomRight: Radius.circular(34),
         ),
       ),
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildBrandLogo(),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'PCRemote',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 42,
+                        Text(
+                          _activeDeviceTitle(),
+                          style: const TextStyle(
+                            color: Color(0xFFE9EDF4),
+                            fontSize: 24,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
                           _deviceTitle(),
                           style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 20,
+                            color: Color(0xFF9FA7B3),
+                            fontSize: 14,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
                     ),
                   ),
+                  IconButton(
+                    onPressed: () {},
+                    icon: const Icon(
+                      Icons.more_vert,
+                      color: Color(0xFF8D96A4),
+                      size: 26,
+                    ),
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 26),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 24),
               child: Text(
                 'Devices',
                 style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 26,
+                  color: Color(0xFFBEC4CF),
+                  fontSize: 40,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _buildMenuItem(
-              icon: Icons.dialpad,
-              label: 'Client area',
+              icon: Icons.phone_android_rounded,
+              label: _clientSectionLabel,
               section: _MenuSection.client,
               compact: compact,
             ),
@@ -197,7 +242,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: Divider(color: Colors.white30),
+              child: Divider(color: Color(0xFF6C7481), thickness: 1.2),
             ),
             _buildMenuItem(
               icon: Icons.settings,
@@ -297,14 +342,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.of(context).size.width < 1000;
-
     return Scaffold(
-      drawer: compact ? Drawer(child: _buildMenu(compact: true)) : null,
+      drawer: Drawer(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topRight: Radius.circular(34),
+            bottomRight: Radius.circular(34),
+          ),
+        ),
+        child: _buildMenu(compact: true),
+      ),
       appBar: AppBar(
         title: Text(
           _selectedSection == _MenuSection.client
-              ? 'Client Area'
+              ? _clientSectionLabel
               : _selectedSection == _MenuSection.pair
                   ? 'Pair New Device'
                   : _selectedSection == _MenuSection.settings
@@ -329,13 +382,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       height: 10,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color:
-                            isRunning ? Colors.greenAccent : Colors.redAccent,
+                        color: isRunning
+                            ? const Color(0xFF145A32)
+                            : const Color(0xFF8B1E1E),
                         boxShadow: isRunning
                             ? [
                                 BoxShadow(
-                                  color:
-                                      Colors.greenAccent.withValues(alpha: 0.6),
+                                  color: const Color(0xFF145A32)
+                                      .withValues(alpha: 0.45),
                                   blurRadius: 6,
                                   spreadRadius: 2,
                                 )
@@ -347,8 +401,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     Text(
                       isRunning ? 'Server On' : 'Server Off',
                       style: TextStyle(
-                        color:
-                            isRunning ? Colors.greenAccent : Colors.redAccent,
+                        color: isRunning
+                            ? const Color(0xFF145A32)
+                            : const Color(0xFF8B1E1E),
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                       ),
@@ -361,12 +416,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Row(
-        children: [
-          if (!compact) _buildMenu(compact: false),
-          Expanded(child: _buildContent()),
-        ],
-      ),
+      body: _buildContent(),
     );
   }
 }

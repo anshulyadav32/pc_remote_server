@@ -45,6 +45,7 @@ class TrustedPermissions {
 
 class TrustedDeviceRecord {
   final String deviceId;
+  final String pairCode;
   final String deviceName;
   final String deviceType;
   final int protocolVersion;
@@ -54,6 +55,7 @@ class TrustedDeviceRecord {
 
   const TrustedDeviceRecord({
     required this.deviceId,
+    this.pairCode = '',
     required this.deviceName,
     required this.deviceType,
     required this.protocolVersion,
@@ -65,6 +67,7 @@ class TrustedDeviceRecord {
   Map<String, dynamic> toJson() {
     return {
       'deviceId': deviceId,
+      'pairCode': pairCode,
       'deviceName': deviceName,
       'deviceType': deviceType,
       'protocolVersion': protocolVersion,
@@ -84,6 +87,7 @@ class TrustedDeviceRecord {
 
     return TrustedDeviceRecord(
       deviceId: (json['deviceId'] ?? '').toString(),
+      pairCode: (json['pairCode'] ?? '').toString(),
       deviceName: (json['deviceName'] ?? 'Unknown Device').toString(),
       deviceType: (json['deviceType'] ?? 'unknown').toString(),
       protocolVersion: int.tryParse('${json['protocolVersion']}') ?? 1,

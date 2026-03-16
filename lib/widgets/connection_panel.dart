@@ -22,34 +22,32 @@ class ConnectionPanel extends StatefulWidget {
 }
 
 class _ConnectionPanelState extends State<ConnectionPanel> {
-  final _deviceNameController = TextEditingController();
-
   final Map<String, _DiscoveredDevice> _discoveredDevices =
       <String, _DiscoveredDevice>{};
 
   List<ConnectionRequest> _pendingRequests = <ConnectionRequest>[];
+  List<PairedDevice> _pairedDevices = <PairedDevice>[];
   bool _isConnecting = false;
   bool _isDiscovering = false;
-  String _requestStatus = 'not_sent';
-  StreamSubscription<String>? _requestSub;
   StreamSubscription<List<ConnectionRequest>>? _pendingSub;
+  StreamSubscription<List<PairedDevice>>? _pairedSub;
 
   @override
   void initState() {
     super.initState();
-    _deviceNameController.text = _defaultDeviceName();
     _pendingRequests = widget.serverService.currentPendingRequests;
-    _requestSub = widget.wsService.requestStatusStream.listen((status) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _requestStatus = status);
-    });
+    _pairedDevices = widget.serverService.currentPairedDevices;
     _pendingSub = widget.serverService.pendingRequestsStream.listen((pending) {
       if (!mounted) {
         return;
       }
       setState(() => _pendingRequests = pending);
+    });
+    _pairedSub = widget.serverService.pairedDevicesStream.listen((paired) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _pairedDevices = paired);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -59,9 +57,8 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
 
   @override
   void dispose() {
-    _requestSub?.cancel();
     _pendingSub?.cancel();
-    _deviceNameController.dispose();
+    _pairedSub?.cancel();
     super.dispose();
   }
 
@@ -75,36 +72,26 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     return 'Flutter Device';
   }
 
-  Future<void> _connect(_DiscoveredDevice device) async {
+  Future<void> _pairWithDiscoveredDevice(_DiscoveredDevice device) async {
     setState(() => _isConnecting = true);
     final success = await widget.wsService.connect(
       device.host,
       serverPort: device.serverPort,
       clientPort: 8766,
-      deviceName: _deviceNameController.text.trim(),
+      deviceName: _defaultDeviceName(),
     );
-    if (mounted) {
-      setState(() => _isConnecting = false);
+
+    if (!mounted) {
+      return;
     }
 
+    setState(() => _isConnecting = false);
     _showMessage(
       success
-          ? 'Request sent. Waiting for server acceptance.'
-          : 'Failed to connect. Check server address and port.',
+          ? 'Request sent to ${device.name}'
+          : 'Failed to send request to ${device.name}',
       isError: !success,
     );
-  }
-
-  void _sendRequestAgain() {
-    widget.wsService.sendConnectionRequest(
-      clientPort: 8766,
-      deviceName: _deviceNameController.text.trim(),
-    );
-    _showMessage('Connection request sent');
-  }
-
-  Future<void> _pairWithDiscoveredDevice(_DiscoveredDevice device) async {
-    await _connect(device);
   }
 
   Future<void> _discoverDevices() async {
@@ -189,7 +176,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       }
 
       if (_isOwnServer(
-          deviceId: deviceId, host: host, serverPort: serverPort)) {
+        deviceId: deviceId,
+        host: host,
+        serverPort: serverPort,
+      )) {
         return;
       }
 
@@ -222,13 +212,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         (host == localIp || host == '127.0.0.1' || host == 'localhost');
   }
 
-  void _disconnect() {
-    widget.wsService.disconnect();
-    _showMessage('Disconnected');
-  }
-
   void _showMessage(String message, {bool isError = false}) {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -240,274 +228,131 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<bool>(
-      stream: widget.wsService.connectionStream,
-      initialData: false,
-      builder: (context, snapshot) {
-        final isConnected = snapshot.data ?? false;
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(10),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 600),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const SizedBox(height: 8),
-                  Icon(
-                    isConnected ? Icons.router : Icons.router_outlined,
-                    size: 56,
-                    color: isConnected ? Colors.green : Colors.grey,
+                  OutlinedButton.icon(
+                    onPressed: _isDiscovering ? null : _discoverDevices,
+                    icon: _isDiscovering
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.wifi_find),
+                    label: Text(
+                      _isDiscovering ? 'Scanning LAN...' : 'Scan devices',
+                    ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
                   Text(
-                    isConnected ? 'Socket Connected' : 'Not Connected',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    'Devices',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
-                          color: isConnected ? Colors.green : Colors.grey,
-                          fontSize: 20,
                         ),
                   ),
                   const SizedBox(height: 10),
-                  Card(
-                    elevation: 3,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            'Scan And Pair',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleLarge
-                                ?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                          ),
-                          const SizedBox(height: 10),
-                          Card(
-                            color: Colors.orange.withValues(alpha: 0.08),
-                            margin: EdgeInsets.zero,
-                            child: Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.pending_actions,
-                                        size: 18,
-                                        color: Colors.orange,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'Incoming Pair Requests (${_pendingRequests.length})',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  if (_pendingRequests.isEmpty)
-                                    Text(
-                                      'No incoming requests yet',
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    )
-                                  else
-                                    ..._pendingRequests.map(
-                                      (request) => Padding(
-                                        padding:
-                                            const EdgeInsets.only(bottom: 8),
-                                        child: Row(
-                                          children: [
-                                            const Icon(
-                                              Icons.person_add_alt_1,
-                                              size: 18,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    request.deviceName,
-                                                    style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      fontSize: 13,
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    request.deviceType,
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodySmall,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            FilledButton(
-                                              onPressed: () => widget
-                                                  .serverService
-                                                  .acceptRequest(
-                                                      request.clientId),
-                                              style: FilledButton.styleFrom(
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 10),
-                                              ),
-                                              child: const Text(
-                                                'Accept',
-                                                style: TextStyle(fontSize: 12),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            OutlinedButton(
-                                              onPressed: () => widget
-                                                  .serverService
-                                                  .rejectRequest(
-                                                      request.clientId),
-                                              style: OutlinedButton.styleFrom(
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 10),
-                                              ),
-                                              child: const Text(
-                                                'Reject',
-                                                style: TextStyle(fontSize: 12),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
+                  if (_pendingRequests.isEmpty && _discoveredDevices.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('No devices found yet. Tap Scan devices.'),
+                    ),
+                  ..._pendingRequests.map(
+                    (request) => Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      color: Colors.orange.withValues(alpha: 0.08),
+                      child: ListTile(
+                        leading: const Icon(Icons.mark_email_unread_outlined),
+                        title: Text(request.deviceName),
+                        subtitle: Text(
+                          'Incoming request',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        trailing: Wrap(
+                          spacing: 6,
+                          children: [
+                            FilledButton(
+                              onPressed: () async {
+                                await widget.serverService
+                                    .acceptRequest(request.clientId);
+                                _showMessage(
+                                  'Accepted ${request.deviceName}',
+                                );
+                              },
+                              child: const Text('Accept'),
                             ),
-                          ),
-                          const SizedBox(height: 10),
-                          Card(
-                            margin: EdgeInsets.zero,
-                            child: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.mark_email_unread_outlined),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Request Status: ${_formatRequestStatus(_requestStatus)}',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            onPressed: isConnected || _isDiscovering
-                                ? null
-                                : _discoverDevices,
-                            icon: _isDiscovering
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.wifi_find),
-                            label: Text(
-                              _isDiscovering
-                                  ? 'Scanning LAN...'
-                                  : 'Scan Available Devices',
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          if (_discoveredDevices.isNotEmpty) ...[
-                            Text(
-                              'Available Devices',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            ..._discoveredDevices.values.map(
-                              (device) => Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                child: ListTile(
-                                  leading: const Icon(Icons.devices),
-                                  title: Text(device.name),
-                                  subtitle: Text(
-                                    '${device.host}:${device.serverPort}',
-                                  ),
-                                  trailing: FilledButton(
-                                    onPressed: isConnected || _isConnecting
-                                        ? null
-                                        : () =>
-                                            _pairWithDiscoveredDevice(device),
-                                    child: const Text('Send Request'),
-                                  ),
-                                ),
-                              ),
+                            OutlinedButton(
+                              onPressed: () async {
+                                await widget.serverService
+                                    .rejectRequest(request.clientId);
+                                _showMessage(
+                                  'Rejected ${request.deviceName}',
+                                );
+                              },
+                              child: const Text('Reject'),
                             ),
                           ],
-                          const SizedBox(height: 4),
-                          if (isConnected)
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: FilledButton.icon(
-                                    onPressed: _sendRequestAgain,
-                                    icon: const Icon(Icons.send),
-                                    label: const Text('Send Request'),
-                                    style: FilledButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 10),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: FilledButton.icon(
-                                    onPressed: _disconnect,
-                                    icon: const Icon(Icons.close),
-                                    label: const Text('Disconnect'),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 10),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            )
-                          else if (_isConnecting)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            ),
-                        ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  ..._discoveredDevices.values.map(
+                    (device) => Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: const Icon(Icons.devices),
+                        title: Text(device.name),
+                        subtitle: Text('${device.host}:${device.serverPort}'),
+                        trailing: FilledButton(
+                          onPressed: _isConnecting
+                              ? null
+                              : () => _pairWithDiscoveredDevice(device),
+                          child: const Text('Send request'),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Paired devices',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_pairedDevices.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('No paired devices yet.'),
+                    ),
+                  ..._pairedDevices.map(
+                    (device) => Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      color: Colors.green.withValues(alpha: 0.07),
+                      child: ListTile(
+                        leading: const Icon(Icons.verified_user),
+                        title: Text(device.deviceName),
+                        subtitle: Text(
+                          device.pairCode.isEmpty
+                              ? 'Paired'
+                              : 'Pair code: ${device.pairCode}',
+                        ),
+                        trailing: OutlinedButton(
+                          onPressed: () async {
+                            await widget.serverService
+                                .unpairDevice(device.clientId);
+                            _showMessage('Unpaired ${device.deviceName}');
+                          },
+                          child: const Text('Unpair'),
+                        ),
                       ),
                     ),
                   ),
@@ -515,26 +360,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
-  }
-}
-
-String _formatRequestStatus(String status) {
-  switch (status) {
-    case 'sending':
-      return 'Sending...';
-    case 'pending':
-      return 'Pending server approval';
-    case 'accepted':
-      return 'Accepted';
-    case 'rejected':
-      return 'Rejected';
-    case 'disconnected':
-      return 'Disconnected';
-    default:
-      return 'Not sent';
   }
 }
 
