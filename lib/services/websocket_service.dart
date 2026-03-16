@@ -329,14 +329,13 @@ class WebSocketService {
         : <String>[];
 
     final trusted = await TrustStoreService.load();
-    final serverPairCode =
-        (message['serverPairCode'] ?? '').toString().trim();
+    final serverPairCode = (message['serverPairCode'] ?? '').toString().trim();
     trusted[serverDeviceId] = TrustedDeviceRecord(
       deviceId: serverDeviceId,
-      pairCode:
-          serverPairCode.isEmpty ? _buildPairCode(serverDeviceId) : serverPairCode,
-      deviceName:
-          (message['serverDeviceName'] ?? 'PCRemote Server').toString(),
+      pairCode: serverPairCode.isEmpty
+          ? _buildPairCode(serverDeviceId)
+          : serverPairCode,
+      deviceName: (message['serverDeviceName'] ?? 'PCRemote Server').toString(),
       deviceType: (message['serverDeviceType'] ?? 'desktop').toString(),
       protocolVersion: int.tryParse('${message['serverProtocolVersion']}') ??
           DeviceIdentityService.protocolVersion,

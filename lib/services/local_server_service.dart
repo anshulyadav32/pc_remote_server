@@ -465,8 +465,8 @@ class LocalServerService {
             'serverPairCode': _buildPairCode(serverId),
             'serverDeviceName': _identity?.deviceName ?? _defaultServerName(),
             'serverDeviceType': _identity?.deviceType ?? _defaultDeviceType(),
-            'serverProtocolVersion':
-                _identity?.protocolVersion ?? DeviceIdentityService.protocolVersion,
+            'serverProtocolVersion': _identity?.protocolVersion ??
+                DeviceIdentityService.protocolVersion,
             'serverCapabilities': _identity?.capabilities ?? _capabilities,
           });
         }
