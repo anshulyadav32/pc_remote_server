@@ -28,7 +28,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final LocalServerService _serverService = LocalServerService();
   final WebSocketService _wsService = WebSocketService();
   _MenuSection _selectedSection = _MenuSection.client;
-  StreamSubscription<List<PairedDevice>>? _pairedDevicesSubscription;
+  StreamSubscription<List<PairedDevice>>? _serverPairedDevicesSubscription;
+  StreamSubscription<List<PairedDevice>>? _remotePairedDevicesSubscription;
+  List<PairedDevice> _serverPairedDevices = <PairedDevice>[];
+  List<PairedDevice> _remotePairedDevices = <PairedDevice>[];
   String _clientSectionLabel = 'No connected device';
 
   Widget _buildBrandLogo() {
@@ -43,17 +46,31 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
 
-    _clientSectionLabel = _buildClientSectionLabel(
-      _serverService.currentPairedDevices,
-    );
+    _serverPairedDevices = _serverService.currentPairedDevices;
+    _remotePairedDevices = _wsService.currentPairedDevices;
+    _clientSectionLabel = _buildClientSectionLabel(_allPairedDevices());
 
-    _pairedDevicesSubscription = _serverService.pairedDevicesStream.listen(
+    _serverPairedDevicesSubscription =
+        _serverService.pairedDevicesStream.listen(
       (devices) {
         if (!mounted) {
           return;
         }
         setState(() {
-          _clientSectionLabel = _buildClientSectionLabel(devices);
+          _serverPairedDevices = devices;
+          _clientSectionLabel = _buildClientSectionLabel(_allPairedDevices());
+        });
+      },
+    );
+
+    _remotePairedDevicesSubscription = _wsService.pairedDevicesStream.listen(
+      (devices) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _remotePairedDevices = devices;
+          _clientSectionLabel = _buildClientSectionLabel(_allPairedDevices());
         });
       },
     );
@@ -66,10 +83,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _pairedDevicesSubscription?.cancel();
+    _serverPairedDevicesSubscription?.cancel();
+    _remotePairedDevicesSubscription?.cancel();
     _serverService.dispose();
     _wsService.dispose();
     super.dispose();
+  }
+
+  List<PairedDevice> _allPairedDevices() {
+    final merged = <String, PairedDevice>{};
+
+    for (final device in _serverPairedDevices) {
+      final key = device.deviceId.isEmpty ? device.clientId : device.deviceId;
+      merged[key] = device;
+    }
+
+    for (final device in _remotePairedDevices) {
+      final key = device.deviceId.isEmpty ? device.clientId : device.deviceId;
+      merged[key] = device;
+    }
+
+    return merged.values.toList();
   }
 
   String _buildClientSectionLabel(List<PairedDevice> pairedDevices) {
@@ -286,6 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               Expanded(
                 child: TabBarView(
+                  physics: const NeverScrollableScrollPhysics(),
                   children: [
                     MouseControlPanel(wsService: _wsService),
                     MediaControlPanel(wsService: _wsService),
@@ -328,7 +363,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     SizedBox(height: 12),
                     Text(
-                      'PCRemote lets you discover devices on LAN, send pairing requests, and control permissions with a KDE Connect-like workflow.',
+                      'PCRemote lets you discover devices on WLAN, send pairing requests, and control permissions with a KDE Connect-like workflow.',
                       style: TextStyle(fontSize: 15),
                     ),
                   ],

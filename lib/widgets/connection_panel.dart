@@ -22,32 +22,61 @@ class ConnectionPanel extends StatefulWidget {
 }
 
 class _ConnectionPanelState extends State<ConnectionPanel> {
+  static const Duration _requestTimeout = Duration(minutes: 1);
+
   final Map<String, _DiscoveredDevice> _discoveredDevices =
       <String, _DiscoveredDevice>{};
 
   List<ConnectionRequest> _pendingRequests = <ConnectionRequest>[];
-  List<PairedDevice> _pairedDevices = <PairedDevice>[];
+  List<PairedDevice> _serverPairedDevices = <PairedDevice>[];
+  List<PairedDevice> _remotePairedDevices = <PairedDevice>[];
   bool _isConnecting = false;
   bool _isDiscovering = false;
+  String _outgoingRequestStatus = 'idle';
+  DateTime? _requestDeadline;
+  _DiscoveredDevice? _lastRequestedDevice;
+  Timer? _requestCountdownTimer;
   StreamSubscription<List<ConnectionRequest>>? _pendingSub;
-  StreamSubscription<List<PairedDevice>>? _pairedSub;
+  StreamSubscription<List<PairedDevice>>? _serverPairedSub;
+  StreamSubscription<List<PairedDevice>>? _remotePairedSub;
+  StreamSubscription<String>? _requestStatusSub;
 
   @override
   void initState() {
     super.initState();
     _pendingRequests = widget.serverService.currentPendingRequests;
-    _pairedDevices = widget.serverService.currentPairedDevices;
+    _serverPairedDevices = widget.serverService.currentPairedDevices;
+    _remotePairedDevices = widget.wsService.currentPairedDevices;
     _pendingSub = widget.serverService.pendingRequestsStream.listen((pending) {
       if (!mounted) {
         return;
       }
       setState(() => _pendingRequests = pending);
     });
-    _pairedSub = widget.serverService.pairedDevicesStream.listen((paired) {
+    _serverPairedSub =
+        widget.serverService.pairedDevicesStream.listen((paired) {
       if (!mounted) {
         return;
       }
-      setState(() => _pairedDevices = paired);
+      setState(() {
+        _serverPairedDevices = paired;
+        _pruneDiscoveredPaired();
+      });
+    });
+    _remotePairedSub = widget.wsService.pairedDevicesStream.listen((paired) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _remotePairedDevices = paired;
+        _pruneDiscoveredPaired();
+      });
+    });
+    _requestStatusSub = widget.wsService.requestStatusStream.listen((status) {
+      if (!mounted) {
+        return;
+      }
+      _updateOutgoingRequestStatus(status, fromStream: true);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -58,8 +87,40 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
   @override
   void dispose() {
     _pendingSub?.cancel();
-    _pairedSub?.cancel();
+    _serverPairedSub?.cancel();
+    _remotePairedSub?.cancel();
+    _requestStatusSub?.cancel();
+    _requestCountdownTimer?.cancel();
     super.dispose();
+  }
+
+  List<PairedDevice> _allPairedDevices() {
+    final merged = <String, PairedDevice>{};
+
+    for (final device in _serverPairedDevices) {
+      final key = device.deviceId.isEmpty ? device.clientId : device.deviceId;
+      merged[key] = device;
+    }
+
+    for (final device in _remotePairedDevices) {
+      final key = device.deviceId.isEmpty ? device.clientId : device.deviceId;
+      merged[key] = device;
+    }
+
+    return merged.values.toList();
+  }
+
+  Future<void> _unpairDevice(PairedDevice device) async {
+    if (device.clientId.startsWith('remote:')) {
+      await widget.wsService.unpairCurrentDevice();
+      _showMessage('Unpaired ${device.deviceName}');
+      unawaited(_discoverDevices());
+      return;
+    }
+
+    await widget.serverService.unpairDevice(device.clientId);
+    _showMessage('Unpaired ${device.deviceName}');
+    unawaited(_discoverDevices());
   }
 
   String _defaultDeviceName() {
@@ -74,6 +135,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
 
   Future<void> _pairWithDiscoveredDevice(_DiscoveredDevice device) async {
     setState(() => _isConnecting = true);
+    _lastRequestedDevice = device;
+    _updateOutgoingRequestStatus('sending');
+
     final success = await widget.wsService.connect(
       device.host,
       serverPort: device.serverPort,
@@ -85,7 +149,18 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       return;
     }
 
-    setState(() => _isConnecting = false);
+    setState(() {
+      _isConnecting = false;
+      if (success) {
+        _discoveredDevices.remove(device.key);
+        _pruneDiscoveredPaired();
+      }
+    });
+
+    if (!success) {
+      _updateOutgoingRequestStatus('failed');
+    }
+
     _showMessage(
       success
           ? 'Request sent to ${device.name}'
@@ -130,13 +205,23 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
 
       final payload = utf8.encode(jsonEncode({'type': 'discover'}));
       final targets = await _discoveryTargets();
-      for (final target in targets) {
-        socket.send(payload, target, 8766);
+
+      Future<void> sendProbe() async {
+        for (final target in targets) {
+          socket?.send(payload, target, 8766);
+        }
       }
 
-      await Future<void>.delayed(const Duration(seconds: 3));
+      // Send multiple probes to improve discovery on slower/restricted WLANs.
+      await sendProbe();
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      await sendProbe();
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      await sendProbe();
+
+      await Future<void>.delayed(const Duration(seconds: 2));
     } catch (_) {
-      _showMessage('Unable to scan devices on this network', isError: true);
+      _showMessage('Unable to scan devices on this WLAN', isError: true);
     } finally {
       await sub?.cancel();
       socket?.close();
@@ -170,7 +255,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
             continue;
           }
 
-          // Best-effort /24 broadcast target for common home LANs.
+          // Best-effort /24 broadcast target for common home WLANs.
           targets
               .add(InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'));
         }
@@ -224,6 +309,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         return;
       }
 
+      if (_isPairedDevice(deviceId)) {
+        return;
+      }
+
       final key = '$host:$serverPort';
       if (!mounted) {
         return;
@@ -231,7 +320,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
 
       setState(() {
         _discoveredDevices[key] = _DiscoveredDevice(
+          key: key,
           name: name,
+          deviceId: deviceId,
           host: host,
           serverPort: serverPort,
         );
@@ -251,6 +342,28 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     final localIp = widget.serverService.localIp;
     return serverPort == widget.serverService.port &&
         (host == localIp || host == '127.0.0.1' || host == 'localhost');
+  }
+
+  bool _isPairedDevice(String deviceId) {
+    if (deviceId.isEmpty) {
+      return false;
+    }
+
+    return _allPairedDevices().any((device) => device.deviceId == deviceId);
+  }
+
+  void _pruneDiscoveredPaired() {
+    final pairedIds = _allPairedDevices()
+        .map((device) => device.deviceId)
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (pairedIds.isEmpty) {
+      return;
+    }
+
+    _discoveredDevices.removeWhere((_, device) {
+      return device.deviceId.isNotEmpty && pairedIds.contains(device.deviceId);
+    });
   }
 
   String _deviceAddressLabel(_DiscoveredDevice device) {
@@ -276,8 +389,156 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     );
   }
 
+  int _remainingRequestSeconds() {
+    final deadline = _requestDeadline;
+    if (deadline == null) {
+      return 0;
+    }
+
+    final remaining = deadline.difference(DateTime.now()).inSeconds;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  void _startRequestCountdown() {
+    _requestCountdownTimer?.cancel();
+    _requestCountdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) {
+        return;
+      }
+
+      if (_remainingRequestSeconds() == 0 &&
+          (_outgoingRequestStatus == 'sending' ||
+              _outgoingRequestStatus == 'pending')) {
+        _updateOutgoingRequestStatus('timeout');
+        return;
+      }
+
+      setState(() {});
+    });
+  }
+
+  void _stopRequestCountdown() {
+    _requestCountdownTimer?.cancel();
+    _requestCountdownTimer = null;
+  }
+
+  void _updateOutgoingRequestStatus(
+    String status, {
+    bool fromStream = false,
+  }) {
+    final waiting = status == 'sending' || status == 'pending';
+
+    setState(() {
+      _outgoingRequestStatus = status;
+      if (waiting) {
+        _requestDeadline = DateTime.now().add(_requestTimeout);
+      } else {
+        _requestDeadline = null;
+      }
+    });
+
+    if (waiting) {
+      _startRequestCountdown();
+    } else {
+      _stopRequestCountdown();
+    }
+
+    if (fromStream && status == 'timeout') {
+      _showMessage('Request timed out after 1 minute. Send again.',
+          isError: true);
+    }
+  }
+
+  Future<void> _resendLastRequest() async {
+    final device = _lastRequestedDevice;
+    if (device == null) {
+      _showMessage('No previous request to resend.', isError: true);
+      return;
+    }
+    await _pairWithDiscoveredDevice(device);
+  }
+
+  Widget _buildOutgoingRequestCard() {
+    if (_outgoingRequestStatus == 'idle') {
+      return const SizedBox.shrink();
+    }
+
+    final deviceName = _lastRequestedDevice?.name ?? 'Device';
+    final remaining = _remainingRequestSeconds();
+
+    String message;
+    Color tint;
+
+    switch (_outgoingRequestStatus) {
+      case 'sending':
+      case 'pending':
+        message =
+            'Request sent to $deviceName. Wait up to 1 minute to accept. ${remaining}s left.';
+        tint = Colors.amber;
+        break;
+      case 'accepted':
+        message = 'Accepted by $deviceName. Configuring both devices...';
+        tint = Colors.green;
+        break;
+      case 'rejected':
+        message = '$deviceName rejected the request. Send again.';
+        tint = Colors.red;
+        break;
+      case 'timeout':
+        message =
+            'No response from $deviceName within 1 minute. Request timed out.';
+        tint = Colors.red;
+        break;
+      case 'disconnected':
+      case 'failed':
+      default:
+        message = 'Request failed/disconnected. Send again.';
+        tint = Colors.red;
+        break;
+    }
+
+    final canResend = _lastRequestedDevice != null &&
+        (_outgoingRequestStatus == 'timeout' ||
+            _outgoingRequestStatus == 'rejected' ||
+            _outgoingRequestStatus == 'disconnected' ||
+            _outgoingRequestStatus == 'failed');
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      color: tint.withValues(alpha: 0.1),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.hourglass_top, color: tint),
+                const SizedBox(width: 10),
+                Expanded(child: Text(message)),
+              ],
+            ),
+            if (canResend) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: _isConnecting ? null : _resendLastRequest,
+                  child: const Text('Send Again'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isNarrow = MediaQuery.of(context).size.width < 560;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
@@ -289,6 +550,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _buildOutgoingRequestCard(),
                   OutlinedButton.icon(
                     onPressed: _isDiscovering ? null : _discoverDevices,
                     icon: _isDiscovering
@@ -299,7 +561,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                           )
                         : const Icon(Icons.wifi_find),
                     label: Text(
-                      _isDiscovering ? 'Scanning LAN...' : 'Scan devices',
+                      _isDiscovering ? 'Scanning WLAN...' : 'Scan WLAN devices',
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -313,7 +575,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                   if (_pendingRequests.isEmpty && _discoveredDevices.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('No devices found yet. Tap Scan devices.'),
+                      child: Text(
+                        'No devices found yet. Tap Scan WLAN devices.',
+                      ),
                     ),
                   ..._pendingRequests.map(
                     (request) => Card(
@@ -322,35 +586,71 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                       child: ListTile(
                         leading: const Icon(Icons.mark_email_unread_outlined),
                         title: Text(request.deviceName),
-                        subtitle: Text(
-                          'Incoming request',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        trailing: Wrap(
-                          spacing: 6,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            FilledButton(
-                              onPressed: () async {
-                                await widget.serverService
-                                    .acceptRequest(request.clientId);
-                                _showMessage(
-                                  'Accepted ${request.deviceName}',
-                                );
-                              },
-                              child: const Text('Accept'),
+                            Text(
+                              'Incoming request',
+                              style: Theme.of(context).textTheme.bodySmall,
                             ),
-                            OutlinedButton(
-                              onPressed: () async {
-                                await widget.serverService
-                                    .rejectRequest(request.clientId);
-                                _showMessage(
-                                  'Rejected ${request.deviceName}',
-                                );
-                              },
-                              child: const Text('Reject'),
-                            ),
+                            if (isNarrow) ...[
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                  FilledButton(
+                                    onPressed: () async {
+                                      await widget.serverService
+                                          .acceptRequest(request.clientId);
+                                      _showMessage(
+                                        'Accepted ${request.deviceName}',
+                                      );
+                                    },
+                                    child: const Text('Accept'),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: () async {
+                                      await widget.serverService
+                                          .rejectRequest(request.clientId);
+                                      _showMessage(
+                                        'Rejected ${request.deviceName}',
+                                      );
+                                    },
+                                    child: const Text('Reject'),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
+                        trailing: isNarrow
+                            ? null
+                            : Wrap(
+                                spacing: 6,
+                                children: [
+                                  FilledButton(
+                                    onPressed: () async {
+                                      await widget.serverService
+                                          .acceptRequest(request.clientId);
+                                      _showMessage(
+                                        'Accepted ${request.deviceName}',
+                                      );
+                                    },
+                                    child: const Text('Accept'),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: () async {
+                                      await widget.serverService
+                                          .rejectRequest(request.clientId);
+                                      _showMessage(
+                                        'Rejected ${request.deviceName}',
+                                      );
+                                    },
+                                    child: const Text('Reject'),
+                                  ),
+                                ],
+                              ),
                       ),
                     ),
                   ),
@@ -378,12 +678,12 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                         ),
                   ),
                   const SizedBox(height: 8),
-                  if (_pairedDevices.isEmpty)
+                  if (_allPairedDevices().isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 8),
                       child: Text('No paired devices yet.'),
                     ),
-                  ..._pairedDevices.map(
+                  ..._allPairedDevices().map(
                     (device) => Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       color: Colors.green.withValues(alpha: 0.07),
@@ -396,11 +696,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                               : 'Pair code: ${device.pairCode}',
                         ),
                         trailing: OutlinedButton(
-                          onPressed: () async {
-                            await widget.serverService
-                                .unpairDevice(device.clientId);
-                            _showMessage('Unpaired ${device.deviceName}');
-                          },
+                          onPressed: () => _unpairDevice(device),
                           child: const Text('Unpair'),
                         ),
                       ),
@@ -417,12 +713,16 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
 }
 
 class _DiscoveredDevice {
+  final String key;
   final String name;
+  final String deviceId;
   final String host;
   final int serverPort;
 
   const _DiscoveredDevice({
+    required this.key,
     required this.name,
+    required this.deviceId,
     required this.host,
     required this.serverPort,
   });

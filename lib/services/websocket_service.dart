@@ -8,9 +8,12 @@ import 'package:web_socket_channel/status.dart' as status;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'device_identity_service.dart';
+import 'local_server_service.dart';
 import 'trust_store_service.dart';
 
 class WebSocketService {
+  static const Duration _requestTimeout = Duration(minutes: 1);
+
   static const List<String> _capabilities = <String>[
     'ping',
     'clipboard',
@@ -30,6 +33,8 @@ class WebSocketService {
       StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<String> _requestStatusController =
       StreamController<String>.broadcast();
+  final StreamController<List<PairedDevice>> _pairedDevicesController =
+      StreamController<List<PairedDevice>>.broadcast();
 
   String? _lastServerUrl;
   int _lastServerPort = 8765;
@@ -37,13 +42,20 @@ class WebSocketService {
   String _lastDeviceName = 'Flutter Device';
   String _lastDeviceId = '';
   Timer? _autoClipboardPollTimer;
+  Timer? _requestTimeoutTimer;
   String _lastLocalClipboardText = '';
   bool _isConnected = false;
   bool _isDisposed = false;
+  PairedDevice? _connectedServer;
 
   Stream<bool> get connectionStream => _connectionController.stream;
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<String> get requestStatusStream => _requestStatusController.stream;
+  Stream<List<PairedDevice>> get pairedDevicesStream =>
+      _pairedDevicesController.stream;
+  List<PairedDevice> get currentPairedDevices => _connectedServer == null
+      ? const <PairedDevice>[]
+      : <PairedDevice>[_connectedServer!];
   bool get isConnected => _isConnected;
 
   Uri _parseServerUri(String serverUrl) {
@@ -139,8 +151,29 @@ class WebSocketService {
     _handleDisconnection();
   }
 
+  Future<void> unpairCurrentDevice() async {
+    final serverDeviceId = _connectedServer?.deviceId ?? '';
+    if (_isConnected && serverDeviceId.isNotEmpty) {
+      _sendRaw({
+        'type': 'unpair.request',
+        'serverDeviceId': serverDeviceId,
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+
+    if (serverDeviceId.isNotEmpty) {
+      final trusted = await TrustStoreService.load();
+      trusted.remove(serverDeviceId);
+      await TrustStoreService.save(trusted);
+    }
+
+    await disconnect();
+  }
+
   void _handleDisconnection() {
     _stopAutoClipboardSync();
+    _stopRequestTimeout();
+    _setConnectedServer(null);
 
     _isConnected = false;
     _addConnectionState(false);
@@ -179,16 +212,25 @@ class WebSocketService {
 
     if (type == 'connect.pending') {
       _addRequestStatus('pending');
+      _startRequestTimeout();
       return;
     }
     if (type == 'connect.accepted') {
       _addRequestStatus('accepted');
+      _stopRequestTimeout();
       unawaited(_rememberTrustedServer(message));
+      _rememberConnectedServer(message);
       unawaited(_startAutoClipboardSync());
       return;
     }
     if (type == 'connect.rejected') {
-      _addRequestStatus('rejected');
+      if ((message['reason'] ?? '').toString() == 'timeout') {
+        _addRequestStatus('timeout');
+      } else {
+        _addRequestStatus('rejected');
+      }
+      _stopRequestTimeout();
+      _setConnectedServer(null);
       _stopAutoClipboardSync(notifyServer: true);
       return;
     }
@@ -256,6 +298,7 @@ class WebSocketService {
     final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
     _addRequestStatus('sending');
+    _startRequestTimeout();
     final resolvedDeviceId = (deviceId ?? _lastDeviceId).trim();
     _sendRaw({
       'type': 'pair.request',
@@ -329,12 +372,15 @@ class WebSocketService {
         : <String>[];
 
     final trusted = await TrustStoreService.load();
+    final sharedPairCode = (message['pairCode'] ?? '').toString().trim();
     final serverPairCode = (message['serverPairCode'] ?? '').toString().trim();
     trusted[serverDeviceId] = TrustedDeviceRecord(
       deviceId: serverDeviceId,
-      pairCode: serverPairCode.isEmpty
-          ? _buildPairCode(serverDeviceId)
-          : serverPairCode,
+      pairCode: sharedPairCode.isNotEmpty
+          ? sharedPairCode
+          : serverPairCode.isEmpty
+              ? _buildPairCode(serverDeviceId)
+              : serverPairCode,
       deviceName: (message['serverDeviceName'] ?? 'PCRemote Server').toString(),
       deviceType: (message['serverDeviceType'] ?? 'desktop').toString(),
       protocolVersion: int.tryParse('${message['serverProtocolVersion']}') ??
@@ -345,6 +391,61 @@ class WebSocketService {
     );
 
     await TrustStoreService.save(trusted);
+  }
+
+  void _rememberConnectedServer(Map<String, dynamic> message) {
+    final serverDeviceId = (message['serverDeviceId'] ?? '').toString().trim();
+    if (serverDeviceId.isEmpty) {
+      return;
+    }
+
+    final rawCapabilities = message['serverCapabilities'];
+    final capabilities = rawCapabilities is List
+        ? rawCapabilities.map((item) => item.toString()).toList()
+        : <String>[];
+
+    _setConnectedServer(
+      PairedDevice(
+        clientId: 'remote:$serverDeviceId',
+        deviceId: serverDeviceId,
+        pairCode: ((message['pairCode'] ?? '').toString().trim().isNotEmpty)
+            ? (message['pairCode'] ?? '').toString().trim()
+            : (message['serverPairCode'] ?? '').toString().trim(),
+        deviceName: (message['serverDeviceName'] ?? 'PCRemote Server')
+            .toString()
+            .trim(),
+        deviceType: (message['serverDeviceType'] ?? 'desktop').toString(),
+        protocolVersion: int.tryParse('${message['serverProtocolVersion']}') ??
+            DeviceIdentityService.protocolVersion,
+        capabilities: capabilities,
+        clientPort: _lastServerPort,
+        pairedAt: DateTime.now(),
+        permissions: const DevicePermissions(),
+      ),
+    );
+  }
+
+  void _setConnectedServer(PairedDevice? device) {
+    _connectedServer = device;
+    if (_isDisposed || _pairedDevicesController.isClosed) {
+      return;
+    }
+    _pairedDevicesController.add(currentPairedDevices);
+  }
+
+  void _startRequestTimeout() {
+    _stopRequestTimeout();
+    _requestTimeoutTimer = Timer(_requestTimeout, () {
+      if (!_isConnected) {
+        return;
+      }
+      _addRequestStatus('timeout');
+    });
+  }
+
+  void _stopRequestTimeout() {
+    _requestTimeoutTimer?.cancel();
+    _requestTimeoutTimer = null;
   }
 
   void sendCommand(Map<String, dynamic> command) {
@@ -410,6 +511,7 @@ class WebSocketService {
   void dispose() {
     _isDisposed = true;
     _stopAutoClipboardSync();
+    _stopRequestTimeout();
 
     final subscription = _subscription;
     _subscription = null;
@@ -427,5 +529,6 @@ class WebSocketService {
     _connectionController.close();
     _messageController.close();
     _requestStatusController.close();
+    _pairedDevicesController.close();
   }
 }

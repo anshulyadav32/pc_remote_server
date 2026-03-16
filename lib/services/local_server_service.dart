@@ -9,6 +9,8 @@ import 'host_controller_service.dart';
 import 'trust_store_service.dart';
 
 class LocalServerService {
+  static const Duration _requestTimeout = Duration(minutes: 1);
+
   static const List<String> _capabilities = <String>[
     'ping',
     'clipboard',
@@ -26,6 +28,7 @@ class LocalServerService {
   final Map<String, String> _clientNames = <String, String>{};
   final Map<String, ConnectionRequest> _pendingRequests =
       <String, ConnectionRequest>{};
+  final Map<String, Timer> _pendingRequestTimers = <String, Timer>{};
   final Map<String, PairedDevice> _pairedDevices = <String, PairedDevice>{};
   Map<String, TrustedDeviceRecord> _trustedDevices =
       <String, TrustedDeviceRecord>{};
@@ -215,6 +218,7 @@ class LocalServerService {
     _clients.clear();
     _clientNames.clear();
     _pendingRequests.clear();
+    _cancelAllPendingRequestTimers();
     _pairedDevices.clear();
     _autoClipboardClients.clear();
     _emitPendingRequests();
@@ -271,9 +275,9 @@ class LocalServerService {
         _handleDiscoveryPacket(datagram);
       });
 
-      _log('LAN discovery listening on UDP 8766');
+      _log('WLAN discovery listening on UDP 8766');
     } catch (e) {
-      _log('LAN discovery unavailable: $e');
+      _log('WLAN discovery unavailable: $e');
     }
   }
 
@@ -461,6 +465,7 @@ class LocalServerService {
             'type': 'connect.accepted',
             'id': clientId,
             'message': 'Previously trusted device auto-approved',
+            'pairCode': resolvedPairCode,
             'serverDeviceId': serverId,
             'serverPairCode': _buildPairCode(serverId),
             'serverDeviceName': _identity?.deviceName ?? _defaultServerName(),
@@ -490,6 +495,7 @@ class LocalServerService {
         requestedAt: DateTime.now(),
       );
       _emitPendingRequests();
+      _startPendingRequestTimer(clientId, name);
 
       _log('Connection request from $name ($clientId)');
       final socket = _clients[clientId];
@@ -563,6 +569,11 @@ class LocalServerService {
       return;
     }
 
+    if (type == 'unpair.request') {
+      await unpairDevice(clientId);
+      return;
+    }
+
     if (_hostController.handleCommand(message)) {
       _log('Executed $type for $clientId');
       return;
@@ -575,6 +586,7 @@ class LocalServerService {
     _clients.remove(clientId);
     final name = _clientNames.remove(clientId) ?? clientId;
     _pendingRequests.remove(clientId);
+    _cancelPendingRequestTimer(clientId);
     _pairedDevices.remove(clientId);
     _autoClipboardClients.remove(clientId);
     if (_autoClipboardClients.isEmpty) {
@@ -588,6 +600,7 @@ class LocalServerService {
 
   Future<void> acceptRequest(String clientId) async {
     final request = _pendingRequests.remove(clientId);
+    _cancelPendingRequestTimer(clientId);
     _emitPendingRequests();
 
     if (request == null) {
@@ -605,6 +618,7 @@ class LocalServerService {
       'type': 'connect.accepted',
       'id': clientId,
       'message': 'Connection request accepted by server',
+      'pairCode': request.pairCode,
       'serverDeviceId': serverId,
       'serverPairCode': _buildPairCode(serverId),
       'serverDeviceName': _identity?.deviceName ?? _defaultServerName(),
@@ -651,6 +665,7 @@ class LocalServerService {
 
   Future<void> rejectRequest(String clientId) async {
     final request = _pendingRequests.remove(clientId);
+    _cancelPendingRequestTimer(clientId);
     _emitPendingRequests();
 
     if (request == null) {
@@ -732,6 +747,40 @@ class LocalServerService {
 
     _emitPairedDevices();
     _log('Unpaired ${paired.deviceName} ($clientId)');
+  }
+
+  void _startPendingRequestTimer(String clientId, String deviceName) {
+    _cancelPendingRequestTimer(clientId);
+    _pendingRequestTimers[clientId] = Timer(_requestTimeout, () {
+      final request = _pendingRequests.remove(clientId);
+      if (request == null) {
+        return;
+      }
+
+      _emitPendingRequests();
+      final socket = _clients[clientId];
+      if (socket != null) {
+        _send(socket, {
+          'type': 'connect.rejected',
+          'id': clientId,
+          'message': 'Request timed out after 1 minute. Send again.',
+          'reason': 'timeout',
+        });
+      }
+      _log('Connection request timed out for $deviceName ($clientId)');
+      _cancelPendingRequestTimer(clientId);
+    });
+  }
+
+  void _cancelPendingRequestTimer(String clientId) {
+    _pendingRequestTimers.remove(clientId)?.cancel();
+  }
+
+  void _cancelAllPendingRequestTimers() {
+    for (final timer in _pendingRequestTimers.values) {
+      timer.cancel();
+    }
+    _pendingRequestTimers.clear();
   }
 
   void _send(WebSocket socket, Map<String, dynamic> data) {
@@ -998,6 +1047,7 @@ class LocalServerService {
     _clients.clear();
     _clientNames.clear();
     _pendingRequests.clear();
+    _cancelAllPendingRequestTimers();
     _pairedDevices.clear();
     _seenNonces.clear();
     _autoClipboardClients.clear();
