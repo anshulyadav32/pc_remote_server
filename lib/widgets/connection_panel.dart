@@ -254,16 +254,12 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
   }
 
   String _deviceAddressLabel(_DiscoveredDevice device) {
-    final isMobileName =
-        device.name.toLowerCase().contains('android') ||
-            device.name.toLowerCase().contains('phone') ||
-            device.name.toLowerCase().contains('mobile');
-
-    if (Platform.isWindows && isMobileName) {
-      return 'localhost:${device.serverPort}';
+    var host = device.host;
+    if (host == 'localhost' || host == '127.0.0.1') {
+      host = widget.serverService.localIp;
     }
 
-    return '${device.host}:${device.serverPort}';
+    return '$host:${device.serverPort}';
   }
 
   void _showMessage(String message, {bool isError = false}) {

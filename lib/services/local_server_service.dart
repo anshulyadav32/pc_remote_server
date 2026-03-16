@@ -85,6 +85,7 @@ class LocalServerService {
       _server = await _bindHttpServerWithFallback(_port);
       _port = _server!.port;
       await _startDiscovery();
+      await _ensureWindowsFirewallPermission();
       _addRunning(true);
       _log('Server started on ws://$_localIp:$_port/ws');
 
@@ -136,6 +137,75 @@ class LocalServerService {
 
     final text = error.toString().toLowerCase();
     return text.contains('address already in use');
+  }
+
+  Future<void> _ensureWindowsFirewallPermission() async {
+    if (!Platform.isWindows) {
+      return;
+    }
+
+    final exePath = Platform.resolvedExecutable;
+    final ruleBase = 'PCRemote';
+
+    final commands = <List<String>>[
+      <String>[
+        'advfirewall',
+        'firewall',
+        'add',
+        'rule',
+        'name=$ruleBase TCP In',
+        'dir=in',
+        'action=allow',
+        'protocol=TCP',
+        'localport=$_port',
+        'program=$exePath',
+      ],
+      <String>[
+        'advfirewall',
+        'firewall',
+        'add',
+        'rule',
+        'name=$ruleBase UDP Discovery In',
+        'dir=in',
+        'action=allow',
+        'protocol=UDP',
+        'localport=8766',
+        'program=$exePath',
+      ],
+      <String>[
+        'advfirewall',
+        'firewall',
+        'add',
+        'rule',
+        'name=$ruleBase UDP Discovery Out',
+        'dir=out',
+        'action=allow',
+        'protocol=UDP',
+        'localport=8766',
+        'program=$exePath',
+      ],
+    ];
+
+    var allOk = true;
+    for (final args in commands) {
+      try {
+        final result = await Process.run('netsh', args);
+        // "already exists" is still fine on repeated starts.
+        final output =
+            '${result.stdout}\n${result.stderr}'.toLowerCase().trim();
+        final ok = result.exitCode == 0 || output.contains('already exists');
+        allOk = allOk && ok;
+      } catch (_) {
+        allOk = false;
+      }
+    }
+
+    if (allOk) {
+      _log('Windows firewall rules verified for PCRemote');
+    } else {
+      _log(
+          'Windows firewall permission may be blocked. Run app as Administrator once or allow PCRemote in Windows Firewall.');
+    }
   }
 
   Future<void> stop() async {
@@ -340,6 +410,8 @@ class LocalServerService {
         return;
       }
 
+      await _reloadTrustedDevices();
+
       final trusted =
           _trustedDevices[deviceId] ?? _findTrustedByPairCode(pairCode);
       if (trusted != null && trusted.deviceId.isNotEmpty) {
@@ -384,10 +456,18 @@ class LocalServerService {
 
         final socket = _clients[clientId];
         if (socket != null) {
+          final serverId = _identity?.deviceId ?? '';
           _send(socket, {
             'type': 'connect.accepted',
             'id': clientId,
             'message': 'Previously trusted device auto-approved',
+            'serverDeviceId': serverId,
+            'serverPairCode': _buildPairCode(serverId),
+            'serverDeviceName': _identity?.deviceName ?? _defaultServerName(),
+            'serverDeviceType': _identity?.deviceType ?? _defaultDeviceType(),
+            'serverProtocolVersion':
+                _identity?.protocolVersion ?? DeviceIdentityService.protocolVersion,
+            'serverCapabilities': _identity?.capabilities ?? _capabilities,
           });
         }
         _log('Auto-approved trusted device $name ($clientId)');
@@ -520,10 +600,18 @@ class LocalServerService {
       return;
     }
 
+    final serverId = _identity?.deviceId ?? '';
     _send(socket, {
       'type': 'connect.accepted',
       'id': clientId,
       'message': 'Connection request accepted by server',
+      'serverDeviceId': serverId,
+      'serverPairCode': _buildPairCode(serverId),
+      'serverDeviceName': _identity?.deviceName ?? _defaultServerName(),
+      'serverDeviceType': _identity?.deviceType ?? _defaultDeviceType(),
+      'serverProtocolVersion':
+          _identity?.protocolVersion ?? DeviceIdentityService.protocolVersion,
+      'serverCapabilities': _identity?.capabilities ?? _capabilities,
     });
     final paired = PairedDevice(
       clientId: clientId,
@@ -881,6 +969,23 @@ class LocalServerService {
     }
 
     return null;
+  }
+
+  Future<void> _reloadTrustedDevices() async {
+    try {
+      _trustedDevices = await TrustStoreService.load();
+    } catch (_) {
+      // Ignore transient read failures and continue using in-memory cache.
+    }
+  }
+
+  String _buildPairCode(String deviceId) {
+    final cleaned =
+        deviceId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toUpperCase();
+    if (cleaned.length >= 6) {
+      return cleaned.substring(cleaned.length - 6);
+    }
+    return cleaned.padLeft(6, '0');
   }
 
   void dispose() {

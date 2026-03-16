@@ -8,6 +8,7 @@ import 'package:web_socket_channel/status.dart' as status;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'device_identity_service.dart';
+import 'trust_store_service.dart';
 
 class WebSocketService {
   static const List<String> _capabilities = <String>[
@@ -182,6 +183,7 @@ class WebSocketService {
     }
     if (type == 'connect.accepted') {
       _addRequestStatus('accepted');
+      unawaited(_rememberTrustedServer(message));
       unawaited(_startAutoClipboardSync());
       return;
     }
@@ -313,6 +315,37 @@ class WebSocketService {
       return cleaned.substring(cleaned.length - 6);
     }
     return cleaned.padLeft(6, '0');
+  }
+
+  Future<void> _rememberTrustedServer(Map<String, dynamic> message) async {
+    final serverDeviceId = (message['serverDeviceId'] ?? '').toString().trim();
+    if (serverDeviceId.isEmpty) {
+      return;
+    }
+
+    final rawCapabilities = message['serverCapabilities'];
+    final caps = rawCapabilities is List
+        ? rawCapabilities.map((item) => item.toString()).toList()
+        : <String>[];
+
+    final trusted = await TrustStoreService.load();
+    final serverPairCode =
+        (message['serverPairCode'] ?? '').toString().trim();
+    trusted[serverDeviceId] = TrustedDeviceRecord(
+      deviceId: serverDeviceId,
+      pairCode:
+          serverPairCode.isEmpty ? _buildPairCode(serverDeviceId) : serverPairCode,
+      deviceName:
+          (message['serverDeviceName'] ?? 'PCRemote Server').toString(),
+      deviceType: (message['serverDeviceType'] ?? 'desktop').toString(),
+      protocolVersion: int.tryParse('${message['serverProtocolVersion']}') ??
+          DeviceIdentityService.protocolVersion,
+      capabilities: caps,
+      permissions: const TrustedPermissions(),
+      updatedAtEpochSeconds: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
+
+    await TrustStoreService.save(trusted);
   }
 
   void sendCommand(Map<String, dynamic> command) {
