@@ -30,8 +30,8 @@ class LocalServerService {
   Map<String, TrustedDeviceRecord> _trustedDevices =
       <String, TrustedDeviceRecord>{};
   final Set<String> _seenNonces = <String>{};
-    final Set<String> _autoClipboardClients = <String>{};
-    final HostControllerService _hostController = HostControllerService();
+  final Set<String> _autoClipboardClients = <String>{};
+  final HostControllerService _hostController = HostControllerService();
 
   final StreamController<bool> _runningController =
       StreamController<bool>.broadcast();
@@ -796,7 +796,7 @@ class LocalServerService {
         type == 'space') {
       return 'media';
     }
-    if (type == 'send_text') {
+    if (type == 'send_text' || type == 'key_press' || type == 'key_combo') {
       return 'text_input';
     }
     if (type.startsWith('clipboard') ||

@@ -188,7 +188,8 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         }
       }
 
-      if (_isOwnServer(deviceId: deviceId, host: host, serverPort: serverPort)) {
+      if (_isOwnServer(
+          deviceId: deviceId, host: host, serverPort: serverPort)) {
         return;
       }
 
@@ -318,9 +319,8 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                                   if (_pendingRequests.isEmpty)
                                     Text(
                                       'No incoming requests yet',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall,
+                                      style:
+                                          Theme.of(context).textTheme.bodySmall,
                                     )
                                   else
                                     ..._pendingRequests.map(
@@ -361,18 +361,16 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                                                   .serverService
                                                   .acceptRequest(
                                                       request.clientId),
-                                              style:
-                                                  FilledButton.styleFrom(
+                                              style: FilledButton.styleFrom(
                                                 visualDensity:
                                                     VisualDensity.compact,
-                                                padding: const EdgeInsets
-                                                    .symmetric(
-                                                    horizontal: 10),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 10),
                                               ),
                                               child: const Text(
                                                 'Accept',
-                                                style:
-                                                    TextStyle(fontSize: 12),
+                                                style: TextStyle(fontSize: 12),
                                               ),
                                             ),
                                             const SizedBox(width: 6),
@@ -381,18 +379,16 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                                                   .serverService
                                                   .rejectRequest(
                                                       request.clientId),
-                                              style:
-                                                  OutlinedButton.styleFrom(
+                                              style: OutlinedButton.styleFrom(
                                                 visualDensity:
                                                     VisualDensity.compact,
-                                                padding: const EdgeInsets
-                                                    .symmetric(
-                                                    horizontal: 10),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 10),
                                               ),
                                               child: const Text(
                                                 'Reject',
-                                                style:
-                                                    TextStyle(fontSize: 12),
+                                                style: TextStyle(fontSize: 12),
                                               ),
                                             ),
                                           ],

@@ -130,6 +130,17 @@ class HostControllerService {
       case 'close_window':
         _sendKeyCombo(const <int>[_vkAlt], _vkF4);
         return true;
+      case 'key_press':
+        final vk = _toInt(message['vk']);
+        if (vk > 0) _sendKeyPress(vk);
+        return true;
+      case 'key_combo':
+        final rawMods = message['modifiers'];
+        final mods =
+            rawMods is List ? rawMods.map<int>(_toInt).toList() : <int>[];
+        final vkCombo = _toInt(message['vk']);
+        if (vkCombo > 0) _sendKeyCombo(mods, vkCombo);
+        return true;
       default:
         return false;
     }

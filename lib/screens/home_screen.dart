@@ -9,6 +9,7 @@ import '../widgets/clipboard_panel.dart';
 import '../widgets/connection_panel.dart';
 import '../widgets/media_control_panel.dart';
 import '../widgets/mouse_control_panel.dart';
+import '../widgets/keyboard_panel.dart';
 import '../widgets/server_panel.dart';
 import '../widgets/text_input_panel.dart';
 import '../widgets/window_control_panel.dart';
@@ -220,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
     switch (_selectedSection) {
       case _MenuSection.client:
         return DefaultTabController(
-          length: 6,
+          length: 7,
           child: Column(
             children: [
               Material(
@@ -232,7 +233,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     Tab(icon: Icon(Icons.music_note), text: 'Media'),
                     Tab(icon: Icon(Icons.web), text: 'Browser'),
                     Tab(icon: Icon(Icons.window), text: 'Window'),
-                    Tab(icon: Icon(Icons.keyboard), text: 'Text'),
+                    Tab(icon: Icon(Icons.keyboard), text: 'Keyboard'),
+                    Tab(icon: Icon(Icons.text_fields), text: 'Text'),
                     Tab(icon: Icon(Icons.content_paste), text: 'Clipboard'),
                   ],
                 ),
@@ -244,6 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     MediaControlPanel(wsService: _wsService),
                     BrowserControlPanel(wsService: _wsService),
                     WindowControlPanel(wsService: _wsService),
+                    KeyboardPanel(wsService: _wsService),
                     TextInputPanel(wsService: _wsService),
                     ClipboardPanel(wsService: _wsService),
                   ],
