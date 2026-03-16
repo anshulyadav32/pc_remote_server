@@ -301,38 +301,40 @@ class _HomeScreenState extends State<HomeScreen> {
       case _MenuSection.client:
         return DefaultTabController(
           length: 7,
-          child: Column(
-            children: [
-              Material(
-                elevation: 1,
-                child: TabBar(
-                  isScrollable: true,
-                  tabs: const [
-                    Tab(icon: Icon(Icons.mouse), text: 'Trackpad'),
-                    Tab(icon: Icon(Icons.music_note), text: 'Media'),
-                    Tab(icon: Icon(Icons.web), text: 'Browser'),
-                    Tab(icon: Icon(Icons.window), text: 'Window'),
-                    Tab(icon: Icon(Icons.keyboard), text: 'Keyboard'),
-                    Tab(icon: Icon(Icons.text_fields), text: 'Text'),
-                    Tab(icon: Icon(Icons.content_paste), text: 'Clipboard'),
-                  ],
+          child: SafeArea(
+            child: Column(
+              children: [
+                Material(
+                  elevation: 1,
+                  child: TabBar(
+                    isScrollable: true,
+                    tabs: const [
+                      Tab(icon: Icon(Icons.mouse), text: 'Trackpad'),
+                      Tab(icon: Icon(Icons.music_note), text: 'Media'),
+                      Tab(icon: Icon(Icons.web), text: 'Browser'),
+                      Tab(icon: Icon(Icons.window), text: 'Window'),
+                      Tab(icon: Icon(Icons.keyboard), text: 'Keyboard'),
+                      Tab(icon: Icon(Icons.text_fields), text: 'Text'),
+                      Tab(icon: Icon(Icons.content_paste), text: 'Clipboard'),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: TabBarView(
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    MouseControlPanel(wsService: _wsService),
-                    MediaControlPanel(wsService: _wsService),
-                    BrowserControlPanel(wsService: _wsService),
-                    WindowControlPanel(wsService: _wsService),
-                    KeyboardPanel(wsService: _wsService),
-                    TextInputPanel(wsService: _wsService),
-                    ClipboardPanel(wsService: _wsService),
-                  ],
+                Expanded(
+                  child: TabBarView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      MouseControlPanel(wsService: _wsService),
+                      MediaControlPanel(wsService: _wsService),
+                      BrowserControlPanel(wsService: _wsService),
+                      WindowControlPanel(wsService: _wsService),
+                      KeyboardPanel(wsService: _wsService),
+                      TextInputPanel(wsService: _wsService),
+                      ClipboardPanel(wsService: _wsService),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       case _MenuSection.pair:
