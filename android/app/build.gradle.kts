@@ -42,3 +42,17 @@ android {
 flutter {
     source = "../.."
 }
+
+tasks.matching { it.name.startsWith("compileFlutterBuild") }.configureEach {
+    doFirst {
+        val variants = listOf("debug", "release", "profile")
+        variants.forEach { variant ->
+            val winBleAsset = file(
+                "$buildDir/intermediates/flutter/$variant/flutter_assets/packages/win_ble/assets/BLEServer.exe"
+            )
+            if (winBleAsset.exists()) {
+                winBleAsset.delete()
+            }
+        }
+    }
+}
