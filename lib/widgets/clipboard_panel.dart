@@ -108,7 +108,8 @@ class _ClipboardPanelState extends State<ClipboardPanel> {
                         _autoClipboardEnabled
                             ? Icons.sync
                             : Icons.sync_disabled,
-                        color: _autoClipboardEnabled ? Colors.green : Colors.grey,
+                        color:
+                            _autoClipboardEnabled ? Colors.green : Colors.grey,
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -122,8 +123,9 @@ class _ClipboardPanelState extends State<ClipboardPanel> {
                   const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: _toggleAutoClipboard,
-                    icon: Icon(
-                        _autoClipboardEnabled ? Icons.sync_disabled : Icons.sync),
+                    icon: Icon(_autoClipboardEnabled
+                        ? Icons.sync_disabled
+                        : Icons.sync),
                     label: Text(_autoClipboardEnabled
                         ? 'Disable Auto Sync'
                         : 'Enable Auto Sync'),

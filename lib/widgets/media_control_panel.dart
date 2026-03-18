@@ -70,8 +70,8 @@ class MediaControlPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildSection(BuildContext context, String title, IconData icon,
-      List<Widget> buttons) {
+  Widget _buildSection(
+      BuildContext context, String title, IconData icon, List<Widget> buttons) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),

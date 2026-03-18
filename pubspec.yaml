@@ -54,6 +54,11 @@ dependencies:
   path_provider: ^2.1.5
   ffi: ^2.2.0
   win_ble: ^1.1.1
+  
+  # Background work dependencies
+  workmanager: ^0.5.2
+  wakelock_plus: ^1.1.1
+  flutter_foreground_task: ^6.3.1
 
 dev_dependencies:
   flutter_test:

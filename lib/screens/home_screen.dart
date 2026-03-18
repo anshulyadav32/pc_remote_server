@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../services/background_work_service.dart';
 import '../services/local_server_service.dart';
 import '../services/websocket_service.dart';
 import '../widgets/browser_control_panel.dart';
@@ -87,6 +88,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _remotePairedDevicesSubscription?.cancel();
     _serverService.dispose();
     _wsService.dispose();
+    
+    // Shutdown background work services
+    BackgroundWorkService().shutdown();
     super.dispose();
   }
 

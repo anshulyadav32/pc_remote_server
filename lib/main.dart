@@ -4,9 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'screens/home_screen.dart';
+import 'services/background_work_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize background work services
+  final backgroundWorkService = BackgroundWorkService();
+  await backgroundWorkService.initialize();
+  
   runApp(const PCRemoteApp());
 }
 
@@ -61,7 +67,9 @@ class _PermissionBootstrapState extends State<_PermissionBootstrap> {
       await permission.request();
     }
 
+    // Request battery optimization exemption and notification runtime permission
     await Permission.ignoreBatteryOptimizations.request();
+    await Permission.notification.request();
   }
 
   @override

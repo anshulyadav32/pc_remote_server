@@ -56,8 +56,9 @@ class WindowControlPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildButton(BuildContext context, String label, IconData icon,
-      VoidCallback onPressed, [Color? backgroundColor]) {
+  Widget _buildButton(
+      BuildContext context, String label, IconData icon, VoidCallback onPressed,
+      [Color? backgroundColor]) {
     return SizedBox(
       width: 150,
       child: FilledButton.icon(
