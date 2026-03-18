@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../modules/bluetooth_module.dart';
 import '../services/local_server_service.dart';
 import '../services/websocket_service.dart';
 
@@ -32,6 +34,15 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
   List<PairedDevice> _remotePairedDevices = <PairedDevice>[];
   bool _isConnecting = false;
   bool _isDiscovering = false;
+  bool _isBluetoothDiscovering = false;
+  bool _isBluetoothConnecting = false;
+  bool _isBluetoothSupported = false;
+  bool _isBluetoothPermissionsGranted = false;
+  BluetoothAdapterState _bluetoothAdapterState = BluetoothAdapterState.unknown;
+  String? _bluetoothError;
+  String? _activeBluetoothDeviceId;
+  String? _connectedBluetoothDeviceName;
+  List<BluetoothScanDevice> _bluetoothDevices = <BluetoothScanDevice>[];
   String _outgoingRequestStatus = 'idle';
   DateTime? _requestDeadline;
   _DiscoveredDevice? _lastRequestedDevice;
@@ -40,6 +51,8 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
   StreamSubscription<List<PairedDevice>>? _serverPairedSub;
   StreamSubscription<List<PairedDevice>>? _remotePairedSub;
   StreamSubscription<String>? _requestStatusSub;
+  StreamSubscription<BluetoothAdapterState>? _bluetoothAdapterSub;
+  StreamSubscription<List<BluetoothScanDevice>>? _bluetoothScanSub;
 
   @override
   void initState() {
@@ -79,6 +92,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       _updateOutgoingRequestStatus(status, fromStream: true);
     });
 
+    if (BluetoothModule.isBluetoothUiEnabled) {
+      unawaited(_initializeBluetooth());
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _discoverDevices();
     });
@@ -91,7 +108,300 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     _remotePairedSub?.cancel();
     _requestStatusSub?.cancel();
     _requestCountdownTimer?.cancel();
+    _bluetoothAdapterSub?.cancel();
+    _bluetoothScanSub?.cancel();
+    unawaited(BluetoothModule.stopScan());
     super.dispose();
+  }
+
+  Future<void> _initializeBluetooth() async {
+    try {
+      final supported = await BluetoothModule.isSupported;
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _isBluetoothSupported = supported;
+        _bluetoothError = supported ? null : 'Bluetooth is unavailable.';
+      });
+
+      if (!supported) {
+        return;
+      }
+
+      _bluetoothAdapterSub =
+          BluetoothModule.adapterStateStream.listen((state) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _bluetoothAdapterState = state;
+        });
+      });
+
+      _bluetoothScanSub =
+          BluetoothModule.scanResultsStream.listen((devices) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _bluetoothDevices = devices;
+        });
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _bluetoothError = 'Failed to initialize Bluetooth.';
+      });
+    }
+  }
+
+  Future<void> _scanBluetoothDevices() async {
+    if (_isBluetoothDiscovering || !_isBluetoothSupported) {
+      return;
+    }
+
+    setState(() {
+      _isBluetoothDiscovering = true;
+      _bluetoothError = null;
+      _bluetoothDevices = <BluetoothScanDevice>[];
+    });
+
+    try {
+      final granted = await BluetoothModule.requestPermissions();
+      if (!mounted) {
+        return;
+      }
+
+      if (!granted) {
+        setState(() {
+          _isBluetoothPermissionsGranted = false;
+          _isBluetoothDiscovering = false;
+          _bluetoothError = 'Bluetooth permission denied.';
+        });
+        return;
+      }
+
+      setState(() {
+        _isBluetoothPermissionsGranted = true;
+      });
+
+      await BluetoothModule.startScan(timeout: const Duration(seconds: 10));
+
+      // Windows scanning is callback-based and stop is scheduled internally.
+      if (Platform.isWindows) {
+        await Future<void>.delayed(const Duration(seconds: 11));
+      }
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _bluetoothError = 'Bluetooth scan failed.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBluetoothDiscovering = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _connectBluetoothDevice(BluetoothScanDevice device) async {
+    if (_isBluetoothConnecting) {
+      return;
+    }
+
+    setState(() {
+      _isBluetoothConnecting = true;
+      _activeBluetoothDeviceId = device.id;
+      _bluetoothError = null;
+    });
+
+    try {
+      await BluetoothModule.connectDevice(device);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _connectedBluetoothDeviceName = device.name;
+      });
+      _showMessage('Bluetooth connected to ${device.name}');
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _bluetoothError = 'Failed to connect ${device.name}.';
+      });
+      _showMessage('Bluetooth connection failed for ${device.name}',
+          isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBluetoothConnecting = false;
+          _activeBluetoothDeviceId = null;
+        });
+      }
+    }
+  }
+
+  String _bluetoothStateLabel() {
+    switch (_bluetoothAdapterState) {
+      case BluetoothAdapterState.on:
+        return 'On';
+      case BluetoothAdapterState.off:
+        return 'Off';
+      case BluetoothAdapterState.turningOn:
+        return 'Turning on';
+      case BluetoothAdapterState.turningOff:
+        return 'Turning off';
+      case BluetoothAdapterState.unavailable:
+        return 'Unavailable';
+      case BluetoothAdapterState.unauthorized:
+        return 'Unauthorized';
+      case BluetoothAdapterState.unknown:
+        return 'Unknown';
+    }
+  }
+
+  Widget _buildBluetoothSection(bool isNarrow) {
+    if (!BluetoothModule.isBluetoothUiEnabled) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 12),
+        Card(
+          color: Colors.blue.withValues(alpha: 0.06),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.bluetooth),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Bluetooth',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const Spacer(),
+                    Text('State: ${_bluetoothStateLabel()}'),
+                  ],
+                ),
+                if (_connectedBluetoothDeviceName != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.bluetooth_connected,
+                          size: 16,
+                          color: Colors.green,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Connected: $_connectedBluetoothDeviceName',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Colors.green.shade800,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                if (_bluetoothError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      _bluetoothError!,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+                if (!_isBluetoothSupported)
+                  const Text('Bluetooth not available on this device.')
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed:
+                            _isBluetoothDiscovering ? null : _scanBluetoothDevices,
+                        icon: _isBluetoothDiscovering
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.search),
+                        label: Text(_isBluetoothDiscovering
+                            ? 'Scanning...'
+                            : 'Scan Bluetooth'),
+                      ),
+                      if (_isBluetoothPermissionsGranted)
+                        Text(
+                          'Permissions granted',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.green.shade700),
+                        ),
+                    ],
+                  ),
+                const SizedBox(height: 8),
+                if (_bluetoothDevices.isEmpty && !_isBluetoothDiscovering)
+                  const Text('No Bluetooth devices discovered yet.')
+                else
+                  ..._bluetoothDevices.map((device) {
+                    final connecting = _isBluetoothConnecting &&
+                        _activeBluetoothDeviceId == device.id;
+
+                    return Card(
+                      margin: const EdgeInsets.only(top: 8),
+                      child: ListTile(
+                        dense: isNarrow,
+                        leading: const Icon(Icons.devices_other),
+                        title: Text(device.name),
+                        subtitle: Text(device.id),
+                        trailing: FilledButton(
+                          onPressed: _isBluetoothConnecting
+                              ? null
+                              : () => _connectBluetoothDevice(device),
+                          child: Text(connecting ? 'Connecting...' : 'Connect'),
+                        ),
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   List<PairedDevice> _allPairedDevices() {
@@ -564,6 +874,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                       _isDiscovering ? 'Scanning WLAN...' : 'Scan WLAN devices',
                     ),
                   ),
+                  _buildBluetoothSection(isNarrow),
                   const SizedBox(height: 14),
                   Text(
                     'Devices',

@@ -6,7 +6,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 /// Service for managing background work and keeping the server alive
 class BackgroundWorkService {
-  static final BackgroundWorkService _instance = BackgroundWorkService._internal();
+  static final BackgroundWorkService _instance =
+      BackgroundWorkService._internal();
 
   bool _isWakeLockEnabled = false;
   bool _isBackgroundTasksRunning = false;
@@ -22,7 +23,8 @@ class BackgroundWorkService {
   /// Initialize background work services
   Future<void> initialize() async {
     if (kDebugMode) {
-      debugPrint('[BackgroundWorkService] Initializing background work services');
+      debugPrint(
+          '[BackgroundWorkService] Initializing background work services');
     }
 
     if (Platform.isAndroid) {
@@ -43,11 +45,13 @@ class BackgroundWorkService {
 
       _isBackgroundTasksRunning = true;
       if (kDebugMode) {
-        debugPrint('[BackgroundWorkService] Android background processing initialized');
+        debugPrint(
+            '[BackgroundWorkService] Android background processing initialized');
       }
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[BackgroundWorkService] Failed to initialize Android background: $e');
+        debugPrint(
+            '[BackgroundWorkService] Failed to initialize Android background: $e');
       }
     }
   }
@@ -63,11 +67,13 @@ class BackgroundWorkService {
 
       _isBackgroundTasksRunning = true;
       if (kDebugMode) {
-        debugPrint('[BackgroundWorkService] Desktop background processing initialized');
+        debugPrint(
+            '[BackgroundWorkService] Desktop background processing initialized');
       }
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[BackgroundWorkService] Failed to initialize desktop background: $e');
+        debugPrint(
+            '[BackgroundWorkService] Failed to initialize desktop background: $e');
       }
     }
   }
@@ -135,7 +141,8 @@ class BackgroundWorkService {
   /// Perform health check to ensure server is still running
   void _performHealthCheck() {
     if (kDebugMode) {
-      debugPrint('[BackgroundWorkService] Performing health check at ${DateTime.now()}');
+      debugPrint(
+          '[BackgroundWorkService] Performing health check at ${DateTime.now()}');
     }
     // This can be extended to verify server status, reconnect clients, etc.
   }
@@ -161,7 +168,8 @@ class BackgroundWorkService {
   /// Rotate logs to prevent them from growing too large
   void _rotateLogs() {
     if (kDebugMode) {
-      debugPrint('[BackgroundWorkService] Log rotation performed at ${DateTime.now()}');
+      debugPrint(
+          '[BackgroundWorkService] Log rotation performed at ${DateTime.now()}');
     }
     // This can be extended to implement actual log rotation
   }
@@ -175,7 +183,8 @@ class BackgroundWorkService {
   /// Shutdown background work services
   Future<void> shutdown() async {
     if (kDebugMode) {
-      debugPrint('[BackgroundWorkService] Shutting down background work services');
+      debugPrint(
+          '[BackgroundWorkService] Shutting down background work services');
     }
 
     // Cancel timers
@@ -187,7 +196,8 @@ class BackgroundWorkService {
 
     _isBackgroundTasksRunning = false;
     if (kDebugMode) {
-      debugPrint('[BackgroundWorkService] Background work services shutdown complete');
+      debugPrint(
+          '[BackgroundWorkService] Background work services shutdown complete');
     }
   }
 }
