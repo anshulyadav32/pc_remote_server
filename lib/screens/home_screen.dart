@@ -11,6 +11,7 @@ import '../widgets/connection_panel.dart';
 import '../widgets/media_control_panel.dart';
 import '../widgets/mouse_control_panel.dart';
 import '../widgets/keyboard_panel.dart';
+import '../widgets/ping_panel.dart';
 import '../widgets/server_panel.dart';
 import '../widgets/text_input_panel.dart';
 import '../widgets/window_control_panel.dart';
@@ -300,7 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
     switch (_selectedSection) {
       case _MenuSection.client:
         return DefaultTabController(
-          length: 7,
+          length: 8,
           child: SafeArea(
             child: Column(
               children: [
@@ -315,6 +316,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Tab(icon: Icon(Icons.window), text: 'Window'),
                       Tab(icon: Icon(Icons.keyboard), text: 'Keyboard'),
                       Tab(icon: Icon(Icons.text_fields), text: 'Text'),
+                      Tab(icon: Icon(Icons.send), text: 'Ping'),
                       Tab(icon: Icon(Icons.content_paste), text: 'Clipboard'),
                     ],
                   ),
@@ -329,6 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       WindowControlPanel(wsService: _wsService),
                       KeyboardPanel(wsService: _wsService),
                       TextInputPanel(wsService: _wsService),
+                      PingPanel(wsService: _wsService),
                       ClipboardPanel(wsService: _wsService),
                     ],
                   ),
